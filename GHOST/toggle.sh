@@ -37,6 +37,6 @@ else
             --no-first-run \
             --user-data-dir="$HOME/.config/ghost-chrome" &
     else
-        notify-send "Ghost" "Daemon not running. Start with: ~/ghost-assit/start.sh" -u normal
+        notify-send "Ghost" "Daemon not running. Start with: ~/ghost-assit/GHOST/start.sh" -u normal
     fi
 fi

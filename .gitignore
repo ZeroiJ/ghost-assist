@@ -22,3 +22,6 @@ screenshots/
 # IDE
 .vscode/
 .idea/
+
+# Ruff cache
+.ruff_cache/
