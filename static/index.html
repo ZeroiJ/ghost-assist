@@ -1,0 +1,48 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Ghost</title>
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+    <div id="ghost-app">
+        <!-- Header -->
+        <header id="header">
+            <div class="header-left">
+                <span class="logo">GHOST</span>
+                <span id="status-dot" class="dot dot-passive"></span>
+                <span id="status-text" class="status-text">passive</span>
+            </div>
+            <div class="header-right">
+                <span id="answer-count" class="answer-count">0</span>
+            </div>
+        </header>
+
+        <!-- Answer Area -->
+        <main id="answers" class="answers">
+            <div id="empty-state" class="empty-state">
+                <div class="empty-icon">&#x1F47B;</div>
+                <p>Listening...</p>
+                <p class="hint">Answers will appear here when a question is detected.</p>
+                <p class="hint">Press <kbd>Super+Shift+H</kbd> to force trigger.</p>
+            </div>
+        </main>
+
+        <!-- Input Area -->
+        <footer id="input-area">
+            <input
+                type="text"
+                id="manual-input"
+                placeholder="Type a follow-up question..."
+                autocomplete="off"
+                spellcheck="false"
+            >
+            <button id="send-btn" title="Send (Enter)">&#x27A4;</button>
+        </footer>
+    </div>
+
+    <script src="/static/app.js"></script>
+</body>
+</html>
