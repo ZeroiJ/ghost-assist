@@ -1,0 +1,7 @@
+Role: Software Engineer
+Tech Stack: Python, JavaScript, Linux, Docker, AWS
+Experience: 3+ years backend development
+Focus areas: System design, API development, databases
+
+(Edit this file with your actual resume summary, target role, and tech stack.
+The content here gets injected into the AI prompt for role-specific answers.)

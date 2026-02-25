@@ -10,10 +10,14 @@
     const answerCount = document.getElementById('answer-count');
     const manualInput = document.getElementById('manual-input');
     const sendBtn = document.getElementById('send-btn');
+    const analyzeBtn = document.getElementById('analyze-btn');
 
     let eventSource = null;
     let totalAnswers = 0;
     let generatingEl = null;
+
+    // Track in-progress streaming answers by ID
+    const streamingCards = {};
 
     // --- SSE Connection ---
     function connectSSE() {
@@ -50,7 +54,17 @@
                 updateStatus(data.state);
                 break;
             case 'answer':
+                // Full answer (from history on reconnect)
                 addAnswer(data);
+                break;
+            case 'answer-start':
+                startStreamingAnswer(data);
+                break;
+            case 'answer-chunk':
+                appendChunk(data);
+                break;
+            case 'answer-done':
+                finalizeAnswer(data);
                 break;
             case 'error':
                 showError(data.message);
@@ -63,10 +77,10 @@
         statusDot.className = 'dot dot-' + state;
         statusText.textContent = state;
 
-        // Show/remove generating indicator
-        if (state === 'generating') {
+        // Show/remove generating indicator (only if no streaming card is active)
+        if (state === 'generating' && Object.keys(streamingCards).length === 0) {
             showGenerating();
-        } else {
+        } else if (state !== 'generating') {
             removeGenerating();
         }
     }
@@ -87,6 +101,78 @@
         }
     }
 
+    // --- Streaming Answer Handlers ---
+    function startStreamingAnswer(data) {
+        // Hide empty state
+        if (emptyState) {
+            emptyState.style.display = 'none';
+        }
+        removeGenerating();
+
+        const card = document.createElement('div');
+        card.className = 'answer-card streaming';
+
+        const time = new Date(data.timestamp * 1000);
+        const timeStr = time.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+        const sourceLabel = data.source === 'auto' ? 'AUTO' : data.source === 'screen' ? 'SCREEN' : 'MANUAL';
+
+        card.innerHTML = `
+            <div class="answer-meta">
+                <span class="answer-source">${sourceLabel} · <span class="answer-ai">...</span></span>
+                <span class="answer-time">${timeStr}</span>
+            </div>
+            <div class="answer-body"><span class="cursor">|</span></div>
+        `;
+
+        answersEl.appendChild(card);
+        scrollToBottom();
+
+        // Track this streaming card
+        streamingCards[data.id] = {
+            card: card,
+            body: card.querySelector('.answer-body'),
+            aiLabel: card.querySelector('.answer-ai'),
+            rawText: '',
+        };
+    }
+
+    function appendChunk(data) {
+        const entry = streamingCards[data.id];
+        if (!entry) return;
+
+        entry.rawText += data.chunk;
+
+        // Re-render the full text with formatting (cursor at end)
+        entry.body.innerHTML = formatAnswer(entry.rawText) + '<span class="cursor">|</span>';
+        scrollToBottom();
+    }
+
+    function finalizeAnswer(data) {
+        const entry = streamingCards[data.id];
+        if (!entry) return;
+
+        // Handle error case
+        if (data.error) {
+            entry.body.innerHTML = `<span style="color: #f85149;">Error: ${escapeHtml(data.error)}</span>`;
+            entry.card.style.borderColor = '#f85149';
+            delete streamingCards[data.id];
+            return;
+        }
+
+        // Finalize: remove cursor, update AI label, remove streaming class
+        entry.rawText = data.answer || entry.rawText;
+        entry.body.innerHTML = formatAnswer(entry.rawText);
+        entry.aiLabel.textContent = data.ai || 'gemini';
+        entry.card.classList.remove('streaming');
+
+        delete streamingCards[data.id];
+
+        totalAnswers++;
+        answerCount.textContent = totalAnswers;
+        scrollToBottom();
+    }
+
+    // --- Full answer (reconnection / history) ---
     function addAnswer(data) {
         // Hide empty state
         if (emptyState) {
@@ -101,7 +187,7 @@
 
         const time = new Date(data.timestamp * 1000);
         const timeStr = time.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-        const sourceLabel = data.source === 'auto' ? 'AUTO' : 'MANUAL';
+        const sourceLabel = data.source === 'auto' ? 'AUTO' : data.source === 'screen' ? 'SCREEN' : 'MANUAL';
         const aiLabel = data.ai || 'gemini';
 
         card.innerHTML = `
@@ -187,9 +273,37 @@
         }
     }
 
-    // Enter to send
+    // --- Screen Analysis ---
+    async function analyzeScreen() {
+        if (analyzeBtn.classList.contains('analyzing')) return; // Prevent double-click
+
+        analyzeBtn.classList.add('analyzing');
+
+        try {
+            const resp = await fetch('/analyze-screen', {
+                method: 'POST',
+            });
+
+            if (!resp.ok) {
+                const data = await resp.json().catch(() => ({}));
+                showError(data.error || 'Screen analysis failed');
+            }
+        } catch (e) {
+            showError('Connection error');
+        }
+
+        // Remove analyzing state after a short delay (the SSE answer-done will handle UI)
+        setTimeout(() => {
+            analyzeBtn.classList.remove('analyzing');
+        }, 3000);
+    }
+
+    // Enter to send, Ctrl+Enter to analyze screen
     manualInput.addEventListener('keydown', function (e) {
-        if (e.key === 'Enter' && !e.shiftKey) {
+        if (e.key === 'Enter' && e.ctrlKey) {
+            e.preventDefault();
+            analyzeScreen();
+        } else if (e.key === 'Enter' && !e.shiftKey) {
             e.preventDefault();
             sendQuestion();
         }
@@ -200,7 +314,33 @@
         }
     });
 
+    // Global Ctrl+Enter (works even when input not focused)
+    document.addEventListener('keydown', function (e) {
+        if (e.key === 'Enter' && e.ctrlKey) {
+            e.preventDefault();
+            analyzeScreen();
+        }
+    });
+
     sendBtn.addEventListener('click', sendQuestion);
+    analyzeBtn.addEventListener('click', analyzeScreen);
+
+    // --- Click-Through Logic ---
+    // Allow clicks to pass through to windows below, except for interactive elements
+    const ghostApp = document.getElementById('ghost-app');
+    const footer = document.querySelector('footer');
+    const buttons = document.querySelectorAll('button');
+    const input = document.getElementById('manual-input');
+
+    // Default: pass clicks through to windows below
+    ghostApp.style.pointerEvents = 'none';
+
+    // Re-enable pointer events on interactive elements
+    footer.style.pointerEvents = 'auto';
+    input.style.pointerEvents = 'auto';
+    buttons.forEach(btn => {
+        btn.style.pointerEvents = 'auto';
+    });
 
     // --- Init ---
     connectSSE();

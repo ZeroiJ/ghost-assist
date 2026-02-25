@@ -3,9 +3,12 @@
 import time
 import logging
 from config import (
+    AUTO_TRIGGER_ENABLED,
     SILENCE_THRESHOLD_SECONDS,
     COOLDOWN_DURATION,
     QUESTION_KEYWORDS,
+    MIN_TRANSCRIPT_WORDS,
+    REQUIRED_KEYWORD_MATCHES,
 )
 
 logger = logging.getLogger("ghost.detector")
@@ -17,6 +20,7 @@ class QuestionDetector:
     def __init__(self):
         self.last_trigger_time: float = 0
         self.cooldown_active: bool = False
+        self.enabled: bool = AUTO_TRIGGER_ENABLED
 
     @property
     def in_cooldown(self) -> bool:
@@ -32,31 +36,54 @@ class QuestionDetector:
         remaining = COOLDOWN_DURATION - (time.time() - self.last_trigger_time)
         return max(0, remaining)
 
+    def _count_keyword_matches(self, text: str) -> int:
+        """Count how many distinct keywords match in the text."""
+        if not text.strip():
+            return 0
+        text_lower = text.lower()
+        return sum(1 for kw in QUESTION_KEYWORDS if kw in text_lower)
+
     def _has_question_keyword(self, text: str) -> bool:
-        """Check if the last sentence contains a question keyword."""
+        """Check if the last sentence has enough keyword matches to be a real question."""
         if not text.strip():
             return False
 
         # Get the last sentence (split on common sentence endings)
         sentences = text.strip().replace("?", ".").replace("!", ".").split(".")
-        # Filter out empty strings
         sentences = [s.strip() for s in sentences if s.strip()]
         if not sentences:
             return False
 
-        last_sentence = sentences[-1].lower()
-        return any(kw in last_sentence for kw in QUESTION_KEYWORDS)
+        last_sentence = sentences[-1]
+
+        # Require minimum word count — short fragments are likely noise
+        word_count = len(last_sentence.split())
+        if word_count < MIN_TRANSCRIPT_WORDS:
+            return False
+
+        # Require multiple keyword matches to reduce false positives
+        matches = self._count_keyword_matches(last_sentence)
+        if matches < REQUIRED_KEYWORD_MATCHES:
+            return False
+
+        return True
 
     def should_trigger(self, transcript: str, silence_duration: float) -> bool:
         """
         Check if we should auto-trigger an AI response.
 
-        Both conditions must be true:
-        1. Silence >= threshold (interviewer finished speaking)
-        2. Last sentence contains a question keyword
+        All conditions must be true:
+        1. Auto-trigger is enabled
+        2. Not in cooldown
+        3. Silence >= threshold (interviewer finished speaking)
+        4. Last sentence is long enough and contains enough question keywords
 
         Returns False during cooldown period.
         """
+        # Master switch
+        if not self.enabled:
+            return False
+
         # Check cooldown
         if self.in_cooldown:
             return False
@@ -65,11 +92,11 @@ class QuestionDetector:
         if silence_duration < SILENCE_THRESHOLD_SECONDS:
             return False
 
-        # Condition 2: question keyword detected
+        # Condition 2: question keyword detected (with stricter matching)
         if not self._has_question_keyword(transcript):
             return False
 
-        # Both conditions met — trigger!
+        # All conditions met — trigger!
         self.last_trigger_time = time.time()
         self.cooldown_active = True
         logger.info(

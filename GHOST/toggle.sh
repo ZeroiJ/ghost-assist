@@ -32,10 +32,25 @@ else
     if curl -s --max-time 1 "$GHOST_URL/status" > /dev/null 2>&1; then
         google-chrome-beta \
             --app="$GHOST_URL" \
-            --class="$GHOST_CLASS" \
+            --class="ghost-assistant" \
             --disable-background-timer-throttling \
             --no-first-run \
             --user-data-dir="$HOME/.config/ghost-chrome" &
+        
+        # Wait for window to appear, then apply size
+        (
+            sleep 4
+            ADDR=$(hyprctl clients -j 2>/dev/null | python3 -c "
+import json,sys
+c = json.load(sys.stdin)
+for x in c:
+    if x.get('class') == 'chrome-localhost__-Default':
+        print(x.get('address'))
+" 2>/dev/null)
+            if [ -n "$ADDR" ]; then
+                hyprctl dispatch resizewindowpixel exact 600 250,address:$ADDR 2>/dev/null
+            fi
+        ) &
     else
         notify-send "Ghost" "Daemon not running. Start with: ~/ghost-assit/GHOST/start.sh" -u normal
     fi

@@ -9,8 +9,10 @@ BASE_DIR = Path(__file__).parent.resolve()
 load_dotenv(BASE_DIR / ".env")
 
 SCREENSHOTS_DIR = BASE_DIR / "screenshots"
+HISTORY_DIR = BASE_DIR / "history"
 STATIC_DIR = BASE_DIR / "static"
 SCREENSHOTS_DIR.mkdir(exist_ok=True)
+HISTORY_DIR.mkdir(exist_ok=True)
 
 # --- Server ---
 HOST = "127.0.0.1"
@@ -27,24 +29,26 @@ TRANSCRIPT_BUFFER_DURATION = 120  # 2 minutes
 # Chunk duration for processing (seconds)
 AUDIO_CHUNK_DURATION = 3
 
+# --- Auto-Trigger Master Switch ---
+AUTO_TRIGGER_ENABLED = os.getenv("AUTO_TRIGGER", "false").lower() == "true"
+
 # --- Silence Detection ---
-SILENCE_THRESHOLD_SECONDS = 2.5
+SILENCE_THRESHOLD_SECONDS = (
+    4.0  # seconds of silence before considering a question ended
+)
 # RMS energy below this = silence (0-1 range for 16-bit audio normalized)
-SILENCE_ENERGY_THRESHOLD = 0.01
+# Typical quiet room ~0.005-0.01, normal speech ~0.05-0.15
+SILENCE_ENERGY_THRESHOLD = 0.03
 
 # --- Question Detection ---
-COOLDOWN_DURATION = 15  # seconds after auto-trigger before next auto-trigger
+COOLDOWN_DURATION = 30  # seconds after auto-trigger before next auto-trigger
+MIN_TRANSCRIPT_WORDS = 8  # minimum words in last sentence to consider as a question
+REQUIRED_KEYWORD_MATCHES = 2  # must match at least this many keyword indicators
 QUESTION_KEYWORDS = [
-    "how",
-    "why",
-    "what",
-    "explain",
-    "implement",
-    "design",
+    # Multi-word phrases (higher signal, less ambiguous)
     "tell me",
     "can you",
     "walk me",
-    "describe",
     "difference between",
     "when would",
     "have you",
@@ -53,9 +57,19 @@ QUESTION_KEYWORDS = [
     "would you",
     "what is",
     "what are",
+    "how would",
+    "how do",
+    "how does",
+    "why would",
+    "why do",
+    "why does",
+    # Single-word (only counted as secondary signal)
+    "explain",
+    "implement",
+    "design",
+    "describe",
     "complexity",
     "optimize",
-    "approach",
     "trade-off",
     "trade off",
 ]
@@ -63,37 +77,58 @@ QUESTION_KEYWORDS = [
 # --- OCR / Screenshots ---
 SCREENSHOT_INTERVAL = 10  # seconds between screenshots
 MAX_SCREEN_SNAPSHOTS = 5  # rolling buffer size
+MAX_HISTORY_ENTRIES = 50  # max saved answers in history/
 
 # --- AI ---
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
-GEMINI_MODEL = "gemini-2.0-flash"
+GEMINI_MODEL = "gemini-2.5-flash"
 OFFLINE_MODE = os.getenv("OFFLINE_MODE", "false").lower() == "true"
 
 OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "llava:7b")
 OLLAMA_HOST = os.getenv("OLLAMA_HOST", "http://localhost:11434")
 
+# --- User Context ---
+CONTEXT_FILE = BASE_DIR / "context.txt"
+
+
+def _load_user_context() -> str:
+    """Load user context from context.txt if it exists."""
+    if CONTEXT_FILE.exists():
+        text = CONTEXT_FILE.read_text().strip()
+        if text:
+            return text
+    return ""
+
+
+USER_CONTEXT = _load_user_context()
+
+
+def reload_user_context() -> str:
+    """Reload user context from context.txt (called by hot-reload endpoint)."""
+    global USER_CONTEXT
+    USER_CONTEXT = _load_user_context()
+    return USER_CONTEXT
+
+
 # --- Gemini Prompt ---
-SYSTEM_PROMPT = """You are a hidden AI assistant helping during a technical interview.
-The user cannot type long messages — give concise, directly usable answers.
+SYSTEM_PROMPT = """You are a hidden teleprompter for a candidate in a live technical interview.
+The candidate is reading your output in real-time on a small overlay — they need EXACT WORDS TO SAY.
 
-CONTEXT:
-- Last 2 minutes of conversation transcript:
-  {transcript}
+RULES:
+- Give the actual words to speak, not suggestions or options
+- 1-3 sentences for verbal answers — concise, confident, natural-sounding
+- If it's a coding question, give the code solution with a brief verbal explanation
+- No preamble ("You could say...", "A good answer would be...") — just the answer itself
+- Sound like a senior engineer who knows their stuff
+- If you detect a follow-up, build on the previous context
 
-- Current screen content (OCR extracted):
-  {screen_text}
+{user_context}CONVERSATION (last 2 minutes):
+{transcript}
 
-Based on the conversation and screen content, what is the most likely
-technical question being asked of the user right now, and what is the
-best answer they should give?
+SCREEN CONTENT (OCR):
+{screen_text}
 
-Format your response exactly like this:
-**Question detected:** <what you think was asked>
-**Answer:** <direct, confident, complete answer>
-**Tip:** <one quick extra tip if relevant, otherwise omit this line>
-
-Keep the answer concise but complete. If it's a coding question,
-include a short code snippet."""
+Detect what's being asked and give the answer to say NOW:"""
 
 
 # --- Ghost State ---
